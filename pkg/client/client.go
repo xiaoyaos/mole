@@ -33,6 +33,44 @@ func splitSubnets(s string) []string {
 	return out
 }
 
+var privateParents = []struct {
+	ip   net.IP
+	mask net.IPMask
+}{
+	{net.IPv4(10, 0, 0, 0), net.CIDRMask(8, 32)},
+	{net.IPv4(172, 16, 0, 0), net.CIDRMask(12, 32)},
+	{net.IPv4(192, 168, 0, 0), net.CIDRMask(16, 32)},
+}
+
+// expandPeerSubnets returns the peer's subnets plus broader RFC 1918 parents.
+// This lets the receiving side route all private traffic that may be
+// reachable through the peer's default gateway.
+func expandPeerSubnets(subnetCSV string) []string {
+	subnets := splitSubnets(subnetCSV)
+	seen := map[string]bool{}
+	for _, s := range subnets {
+		seen[s] = true
+	}
+
+	for _, s := range subnets {
+		_, cidr, err := net.ParseCIDR(s)
+		if err != nil {
+			continue
+		}
+		for _, p := range privateParents {
+			n := &net.IPNet{IP: p.ip, Mask: p.mask}
+			if n.Contains(cidr.IP) {
+				parentCIDR := n.String()
+				if !seen[parentCIDR] {
+					seen[parentCIDR] = true
+					subnets = append(subnets, parentCIDR)
+				}
+			}
+		}
+	}
+	return subnets
+}
+
 type peerConnection struct {
 	mu           sync.Mutex
 	peerID       string
@@ -92,10 +130,9 @@ func (c *Client) Start() error {
 	} else {
 		log.Printf("No local subnet specified, trying auto-detect...")
 		if subnet, iface, err := tunnel.AutoDetectSubnet(); err == nil {
+			c.cfg.LocalSubnet = subnet
 			c.localIface = iface
-			log.Printf("Auto-detected local subnets: %s (interface: %s)", subnet, iface)
-			c.cfg.LocalSubnet = subnet + ",10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-			log.Printf("Sharing: %s", c.cfg.LocalSubnet)
+			log.Printf("Auto-detected subnet: %s (interface: %s)", subnet, iface)
 			c.setupLocalSubnet(tun)
 		} else {
 			log.Printf("Warning: auto-detect subnet: %v", err)
@@ -398,7 +435,7 @@ func (c *Client) connectToPeer(pc *peerConnection) {
 	log.Printf("Relay connection established with %s", pc.peerID[:8])
 
 	if pc.localSubnet != "" && c.tunIface != nil {
-		for _, subnet := range splitSubnets(pc.localSubnet) {
+		for _, subnet := range expandPeerSubnets(pc.localSubnet) {
 			if err := c.tunIface.AddRoute(subnet); err != nil {
 				log.Printf("Add route for %s: %v", subnet, err)
 			} else {
@@ -541,7 +578,7 @@ func (c *Client) removePeer(peerID string) {
 
 	if pc, exists := c.peers[peerID]; exists {
 		if pc.localSubnet != "" && c.tunIface != nil {
-			for _, subnet := range splitSubnets(pc.localSubnet) {
+			for _, subnet := range expandPeerSubnets(pc.localSubnet) {
 				if err := c.tunIface.RemoveRoute(subnet); err != nil {
 					log.Printf("Remove route %s: %v", subnet, err)
 				}
@@ -578,7 +615,7 @@ func (c *Client) cleanup() {
 
 		for _, pc := range peers {
 			if pc.localSubnet != "" {
-				for _, subnet := range splitSubnets(pc.localSubnet) {
+				for _, subnet := range expandPeerSubnets(pc.localSubnet) {
 					c.tunIface.RemoveRoute(subnet)
 				}
 			}
