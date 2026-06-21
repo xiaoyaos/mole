@@ -121,7 +121,9 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) run() error {
+	c.stopped = false
 	c.stopCh = make(chan struct{})
+	defer c.cleanup()
 
 	if err := c.connectWebSocket(); err != nil {
 		return fmt.Errorf("connect: %w", err)
@@ -164,8 +166,6 @@ func (c *Client) run() error {
 	go c.heartbeat()
 
 	c.messageLoop()
-
-	c.cleanup()
 
 	return fmt.Errorf("connection closed")
 }
@@ -635,12 +635,6 @@ func (c *Client) cleanup() {
 	c.stopped = true
 	c.mu.Unlock()
 
-	select {
-	case <-c.stopCh:
-	default:
-		close(c.stopCh)
-	}
-
 	if c.tunIface != nil {
 		c.mu.RLock()
 		peers := make([]*peerConnection, 0, len(c.peers))
@@ -665,6 +659,12 @@ func (c *Client) cleanup() {
 			c.tunIface.RemoveNAT(c.localIface)
 		}
 		c.tunIface.Close()
+	}
+
+	select {
+	case <-c.stopCh:
+	default:
+		close(c.stopCh)
 	}
 }
 
