@@ -92,9 +92,10 @@ func (c *Client) Start() error {
 	} else {
 		log.Printf("No local subnet specified, trying auto-detect...")
 		if subnet, iface, err := tunnel.AutoDetectSubnet(); err == nil {
-			c.cfg.LocalSubnet = subnet
 			c.localIface = iface
-			log.Printf("Auto-detected subnet: %s (interface: %s)", subnet, iface)
+			log.Printf("Auto-detected local subnets: %s (interface: %s)", subnet, iface)
+			c.cfg.LocalSubnet = subnet + ",10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+			log.Printf("Sharing: %s", c.cfg.LocalSubnet)
 			c.setupLocalSubnet(tun)
 		} else {
 			log.Printf("Warning: auto-detect subnet: %v", err)
