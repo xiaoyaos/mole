@@ -290,10 +290,14 @@ func (t *Interface) wrapEthernet(ipPacket []byte) []byte {
 	}
 
 	if t.macAddr != nil && len(t.macAddr) == 6 {
-		copy(frame[0:6], t.macAddr)
+		for i := range frame[:6] {
+			frame[i] = 0xff
+		}
 		copy(frame[6:12], t.macAddr)
 	} else {
-		frame[5] = 0x01
+		for i := range frame[:6] {
+			frame[i] = 0xff
+		}
 		frame[11] = 0x01
 	}
 

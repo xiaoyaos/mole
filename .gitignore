@@ -1,0 +1,8 @@
+bin/
+nt-client*
+nt-server*
+tcpproxy*
+*.exe
+*.test
+*.out
+.DS_Store
