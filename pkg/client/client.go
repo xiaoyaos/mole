@@ -92,6 +92,7 @@ type Client struct {
 	mu         sync.RWMutex
 	relayAddr  string
 	localIface string
+	stopCh     chan struct{}
 	stopped    bool
 }
 
@@ -104,6 +105,24 @@ func NewClient(cfg *config.ClientConfig) *Client {
 }
 
 func (c *Client) Start() error {
+	for {
+		err := c.run()
+		if err != nil {
+			log.Printf("连接断开: %v，5秒后重连...", err)
+		} else {
+			return nil
+		}
+		select {
+		case <-c.stopCh:
+			return nil
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+func (c *Client) run() error {
+	c.stopCh = make(chan struct{})
+
 	if err := c.connectWebSocket(); err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
@@ -148,7 +167,7 @@ func (c *Client) Start() error {
 
 	c.cleanup()
 
-	return nil
+	return fmt.Errorf("connection closed")
 }
 
 func (c *Client) setupLocalSubnet(tun *tunnel.Interface) {
@@ -414,6 +433,10 @@ func (c *Client) connectToPeer(pc *peerConnection) {
 		c.removePeer(pc.peerID)
 		return
 	}
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(15 * time.Second)
+	}
 
 	handshake := fmt.Sprintf("RELAY %s\n", sessionID)
 	if _, err := conn.Write([]byte(handshake)); err != nil {
@@ -480,7 +503,14 @@ func (c *Client) tunForwarder() {
 	for {
 		packet, err := c.tunIface.ReadPacket()
 		if err != nil {
-			continue
+			select {
+			case <-c.stopCh:
+				return
+			default:
+				log.Printf("TUN read error: %v", err)
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
 		}
 
 		if len(packet) < 20 {
@@ -605,6 +635,12 @@ func (c *Client) cleanup() {
 	c.stopped = true
 	c.mu.Unlock()
 
+	select {
+	case <-c.stopCh:
+	default:
+		close(c.stopCh)
+	}
+
 	if c.tunIface != nil {
 		c.mu.RLock()
 		peers := make([]*peerConnection, 0, len(c.peers))
@@ -642,10 +678,15 @@ func (c *Client) heartbeat() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		msg := protocol.Message{Type: protocol.MsgTypeHeartbeat}
-		if err := c.sendMessage(&msg); err != nil {
-			log.Printf("Heartbeat error: %v", err)
+	for {
+		select {
+		case <-ticker.C:
+			msg := protocol.Message{Type: protocol.MsgTypeHeartbeat}
+			if err := c.sendMessage(&msg); err != nil {
+				log.Printf("Heartbeat error: %v", err)
+			}
+		case <-c.stopCh:
+			return
 		}
 	}
 }

@@ -220,19 +220,17 @@ func relayCopy(a, b net.Conn) {
 	defer a.Close()
 	defer b.Close()
 
-	done := make(chan struct{}, 2)
-
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
 		io.Copy(a, b)
-		done <- struct{}{}
+		wg.Done()
 	}()
-
 	go func() {
 		io.Copy(b, a)
-		done <- struct{}{}
+		wg.Done()
 	}()
-
-	<-done
+	wg.Wait()
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
