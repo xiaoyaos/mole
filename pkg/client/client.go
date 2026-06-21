@@ -459,6 +459,17 @@ func (c *Client) tunForwarder() {
 			continue
 		}
 
+		// Strip TCP timestamp option from forwarded SYNs to avoid macOS fingerprinting
+		if len(packet) > 20 && packet[9] == 6 {
+			ipHdrLen := int(packet[0]&0x0F) * 4
+			if len(packet) >= ipHdrLen+14 {
+				flags := packet[ipHdrLen+13]
+				if (flags&0x02) != 0 && (flags&0x10) == 0 {
+					packet = stripTCPTimestamp(packet)
+				}
+			}
+		}
+
 		if peer := c.findPeerForDest(destIP); peer != nil {
 			c.sendToPeer(peer, packet)
 		}
@@ -669,4 +680,118 @@ func marshalPayload(from, to interface{}) error {
 		return err
 	}
 	return json.Unmarshal(data, to)
+}
+
+// stripTCPTimestamp removes TCP timestamp option (type 8) from SYN packets
+// to avoid OS fingerprinting — macOS randomizes timestamps, Windows doesn't.
+func stripTCPTimestamp(packet []byte) []byte {
+	ipHdrLen := int(packet[0]&0x0F) * 4
+	if len(packet) < ipHdrLen+20 {
+		return packet
+	}
+	tcpOff := ipHdrLen
+	dataOff := int(packet[tcpOff+12] >> 4) * 4
+	if dataOff <= 20 {
+		return packet
+	}
+
+	optEnd := tcpOff + dataOff
+	optStart := tcpOff + 20
+
+	// Scan for timestamp option (kind=8)
+	stripped := false
+	buf := make([]byte, 0, dataOff-20)
+	for i := optStart; i < optEnd; {
+		if i >= len(packet) {
+			break
+		}
+		kind := packet[i]
+		if kind == 0 {
+			break
+		}
+		if kind == 1 {
+			buf = append(buf, 1)
+			i++
+			continue
+		}
+		if i+1 >= len(packet) {
+			break
+		}
+		length := int(packet[i+1])
+		if length < 2 || i+length > optEnd || i+length > len(packet) {
+			break
+		}
+		if kind == 8 && length == 10 {
+			stripped = true
+			i += length
+			continue
+		}
+		buf = append(buf, packet[i:i+length]...)
+		i += length
+	}
+
+	if !stripped {
+		return packet
+	}
+
+	// Pad to 4-byte boundary
+	for len(buf)%4 != 0 {
+		buf = append(buf, 1)
+	}
+
+	newDataOff := 20 + len(buf)
+	if newDataOff > 60 {
+		return packet
+	}
+
+	// Build modified packet
+	newLen := tcpOff + newDataOff + (len(packet) - (tcpOff + dataOff))
+	out := make([]byte, newLen)
+	copy(out, packet[:tcpOff+12])
+	copy(out[tcpOff+20:tcpOff+20+len(buf)], buf)
+	copy(out[tcpOff+newDataOff:], packet[tcpOff+dataOff:])
+
+	// Update TCP data offset
+	out[tcpOff+12] = (out[tcpOff+12] & 0x0F) | byte((newDataOff/4)<<4)
+
+	// Recalculate TCP checksum
+	srcIP := packet[12:16]
+	dstIP := packet[16:20]
+	tcpLen := newDataOff + (len(packet) - (tcpOff + dataOff))
+	setTCPChecksum(out[tcpOff:tcpOff+tcpLen], srcIP, dstIP)
+
+	return out
+}
+
+func setTCPChecksum(tcp []byte, srcIP, dstIP []byte) {
+	for i := range tcp {
+		_ = i
+	}
+	tcp[16] = 0
+	tcp[17] = 0
+
+	totalLen := len(tcp)
+	pseudo := make([]byte, 12+totalLen)
+	copy(pseudo[0:4], srcIP)
+	copy(pseudo[4:8], dstIP)
+	pseudo[8] = 0
+	pseudo[9] = 6
+	pseudo[10] = byte(totalLen >> 8)
+	pseudo[11] = byte(totalLen)
+	copy(pseudo[12:], tcp)
+
+	var sum uint32
+	for i := 0; i < len(pseudo); i += 2 {
+		if i+1 < len(pseudo) {
+			sum += uint32(pseudo[i])<<8 | uint32(pseudo[i+1])
+		} else {
+			sum += uint32(pseudo[i]) << 8
+		}
+	}
+	for (sum >> 16) > 0 {
+		sum = (sum & 0xFFFF) + (sum >> 16)
+	}
+	cksum := uint16(^sum & 0xFFFF)
+	tcp[16] = byte(cksum >> 8)
+	tcp[17] = byte(cksum)
 }
