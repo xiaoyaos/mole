@@ -217,17 +217,16 @@ func readLine(conn net.Conn) (string, error) {
 }
 
 func relayCopy(a, b net.Conn) {
-	defer a.Close()
-	defer b.Close()
-
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		io.Copy(a, b)
+		b.Close()
 		wg.Done()
 	}()
 	go func() {
 		io.Copy(b, a)
+		a.Close()
 		wg.Done()
 	}()
 	wg.Wait()

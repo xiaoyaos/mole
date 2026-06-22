@@ -90,9 +90,11 @@ type Client struct {
 	tunIface   *tunnel.Interface
 	peers      map[string]*peerConnection
 	mu         sync.RWMutex
+	wsMu       sync.Mutex
 	relayAddr  string
 	localIface string
 	stopCh     chan struct{}
+	stoppedCh  chan struct{}
 	stopped    bool
 }
 
@@ -101,6 +103,8 @@ func NewClient(cfg *config.ClientConfig) *Client {
 		cfg:       cfg,
 		peers:     make(map[string]*peerConnection),
 		relayAddr: cfg.ServerAddr,
+		stopCh:    make(chan struct{}),
+		stoppedCh: make(chan struct{}),
 	}
 }
 
@@ -113,7 +117,7 @@ func (c *Client) Start() error {
 			return nil
 		}
 		select {
-		case <-c.stopCh:
+		case <-c.stoppedCh:
 			return nil
 		case <-time.After(5 * time.Second):
 		}
@@ -121,7 +125,10 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) run() error {
+	c.mu.Lock()
 	c.stopped = false
+	c.peers = make(map[string]*peerConnection)
+	c.mu.Unlock()
 	c.stopCh = make(chan struct{})
 	defer c.cleanup()
 
@@ -579,6 +586,9 @@ func (c *Client) sendToPeer(pc *peerConnection, data []byte) error {
 		return fmt.Errorf("peer not connected")
 	}
 
+	pc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	defer pc.conn.SetWriteDeadline(time.Time{})
+
 	length := uint16(len(data))
 	if err := binary.Write(pc.conn, binary.BigEndian, length); err != nil {
 		return err
@@ -628,10 +638,7 @@ func (c *Client) removePeer(peerID string) {
 
 func (c *Client) cleanup() {
 	c.mu.Lock()
-	if c.stopped {
-		c.mu.Unlock()
-		return
-	}
+	closeStopCh := !c.stopped
 	c.stopped = true
 	c.mu.Unlock()
 
@@ -661,16 +668,36 @@ func (c *Client) cleanup() {
 		c.tunIface.Close()
 	}
 
-	select {
-	case <-c.stopCh:
-	default:
-		close(c.stopCh)
+	if closeStopCh {
+		select {
+		case <-c.stopCh:
+		default:
+			close(c.stopCh)
+		}
 	}
 }
 
 func (c *Client) Stop() {
-	if c.wsConn != nil {
-		c.wsConn.Close()
+	c.mu.Lock()
+	alreadyStopped := c.stopped
+	c.stopped = true
+	c.mu.Unlock()
+
+	select {
+	case <-c.stoppedCh:
+	default:
+		close(c.stoppedCh)
+	}
+
+	if !alreadyStopped {
+		if c.wsConn != nil {
+			c.wsConn.Close()
+		}
+		select {
+		case <-c.stopCh:
+		default:
+			close(c.stopCh)
+		}
 	}
 }
 
@@ -746,6 +773,13 @@ func (p *peerConnection) AllowPossess() bool { return p.allowPossess }
 func (p *peerConnection) LocalSubnet() string { return p.localSubnet }
 
 func (c *Client) sendMessage(msg *protocol.Message) error {
+	c.wsMu.Lock()
+	defer c.wsMu.Unlock()
+
+	if c.wsConn == nil {
+		return fmt.Errorf("not connected")
+	}
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -826,12 +860,20 @@ func stripTCPTimestamp(packet []byte) []byte {
 	// Build modified packet
 	newLen := tcpOff + newDataOff + (len(packet) - (tcpOff + dataOff))
 	out := make([]byte, newLen)
-	copy(out, packet[:tcpOff+12])
+	copy(out, packet[:tcpOff+20])
 	copy(out[tcpOff+20:tcpOff+20+len(buf)], buf)
 	copy(out[tcpOff+newDataOff:], packet[tcpOff+dataOff:])
 
 	// Update TCP data offset
 	out[tcpOff+12] = (out[tcpOff+12] & 0x0F) | byte((newDataOff/4)<<4)
+
+	// Update IP Total Length
+	totalLen := uint16(newLen)
+	out[2] = byte(totalLen >> 8)
+	out[3] = byte(totalLen)
+
+	// Recalculate IP header checksum
+	setIPChecksum(out[:tcpOff])
 
 	// Recalculate TCP checksum
 	srcIP := packet[12:16]
@@ -842,10 +884,27 @@ func stripTCPTimestamp(packet []byte) []byte {
 	return out
 }
 
-func setTCPChecksum(tcp []byte, srcIP, dstIP []byte) {
-	for i := range tcp {
-		_ = i
+func setIPChecksum(ipHeader []byte) {
+	ipHeader[10] = 0
+	ipHeader[11] = 0
+
+	var sum uint32
+	for i := 0; i < len(ipHeader); i += 2 {
+		if i+1 < len(ipHeader) {
+			sum += uint32(ipHeader[i])<<8 | uint32(ipHeader[i+1])
+		} else {
+			sum += uint32(ipHeader[i]) << 8
+		}
 	}
+	for (sum >> 16) > 0 {
+		sum = (sum & 0xFFFF) + (sum >> 16)
+	}
+	cksum := uint16(^sum & 0xFFFF)
+	ipHeader[10] = byte(cksum >> 8)
+	ipHeader[11] = byte(cksum)
+}
+
+func setTCPChecksum(tcp []byte, srcIP, dstIP []byte) {
 	tcp[16] = 0
 	tcp[17] = 0
 

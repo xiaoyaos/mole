@@ -28,8 +28,23 @@ type Interface struct {
 	macAddr net.HardwareAddr
 }
 
+func resetTAP() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-Command",
+		"Get-PnpDevice -Class Net | Where-Object { $_.FriendlyName -like '*TAP*' } | Disable-PnpDevice -Confirm:$false -ErrorAction:SilentlyContinue").Run()
+	time.Sleep(2 * time.Second)
+	exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-Command",
+		"Get-PnpDevice -Class Net | Where-Object { $_.FriendlyName -like '*TAP*' } | Enable-PnpDevice -Confirm:$false -ErrorAction:SilentlyContinue").Run()
+	time.Sleep(2 * time.Second)
+}
+
 func CreateTUN(ip, cidr string, mtu int) (*Interface, error) {
 	isTAP := runtime.GOOS == "windows"
+
+	// Reset TAP device PnP state before opening, to clear driver residual state
+	resetTAP()
 
 	cfg := water.Config{
 		DeviceType: water.TUN,
@@ -145,6 +160,7 @@ func (t *Interface) configureWindows(ip, cidr string, mtu int) error {
 	exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-Command",
 		fmt.Sprintf("Set-NetIPInterface -InterfaceAlias '%s' -Forwarding Enabled -ErrorAction:SilentlyContinue", t.name)).Run()
 
+	exec.Command("route", "delete", ipnet.IP.String()).Run()
 	exec.Command("route", "add", ipnet.IP.String(), "mask", mask, ip, "metric", "1").Run()
 	return nil
 }
@@ -162,6 +178,7 @@ func (t *Interface) AddRoute(subnet string) error {
 	case "linux":
 		return exec.Command("ip", "route", "add", subnet, "dev", t.name).Run()
 	case "windows":
+		exec.Command("route", "delete", ipnet.IP.String()).Run()
 		return exec.Command("route", "add", ipnet.IP.String(), "mask", mask, t.tunIP, "metric", "1").Run()
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
