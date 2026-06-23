@@ -83,19 +83,21 @@ type peerConnection struct {
 }
 
 type Client struct {
-	cfg        *config.ClientConfig
-	wsConn     *websocket.Conn
-	clientID   string
-	tunnelIP   string
-	tunIface   *tunnel.Interface
-	peers      map[string]*peerConnection
-	mu         sync.RWMutex
-	wsMu       sync.Mutex
-	relayAddr  string
-	localIface string
-	stopCh     chan struct{}
-	stoppedCh  chan struct{}
-	stopped    bool
+	cfg           *config.ClientConfig
+	wsConn        *websocket.Conn
+	clientID      string
+	tunnelIP      string
+	tunIface      *tunnel.Interface
+	peers         map[string]*peerConnection
+	mu            sync.RWMutex
+	wsMu          sync.Mutex
+	relayAddr     string
+	localIface    string
+	stopCh        chan struct{}
+	stoppedCh     chan struct{}
+	stopped       bool
+	peerListCache []protocol.PeerInfo
+	peerCacheMu   sync.RWMutex
 }
 
 func NewClient(cfg *config.ClientConfig) *Client {
@@ -314,8 +316,12 @@ func (c *Client) handlePeerList(msg *protocol.Message) {
 		return
 	}
 
+	c.peerCacheMu.Lock()
+	c.peerListCache = peers
+	c.peerCacheMu.Unlock()
+
 	log.Printf("Available peers (%d):", len(peers))
-	for _, p := range peers {
+	for i, p := range peers {
 		possessStr := "allow"
 		if !p.AllowPossess {
 			possessStr = "deny"
@@ -324,8 +330,8 @@ func (c *Client) handlePeerList(msg *protocol.Message) {
 		if p.LocalSubnet != "" {
 			subnetInfo = fmt.Sprintf(", subnets=%s", p.LocalSubnet)
 		}
-		log.Printf("  %s (%s) IP=%s [possess=%s]%s",
-			p.ClientName, p.ClientID, p.TunnelIP, possessStr, subnetInfo)
+		log.Printf("  %d. %s (%s) IP=%s [possess=%s]%s",
+			i+1, p.ClientName, shortID(p.ClientID), p.TunnelIP, possessStr, subnetInfo)
 	}
 }
 
@@ -771,6 +777,38 @@ func (p *peerConnection) PeerName() string { return p.peerName }
 func (p *peerConnection) PeerIP() string   { return p.peerIP }
 func (p *peerConnection) AllowPossess() bool { return p.allowPossess }
 func (p *peerConnection) LocalSubnet() string { return p.localSubnet }
+
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+func (c *Client) ConnectByIndex(idx int) error {
+	c.peerCacheMu.RLock()
+	defer c.peerCacheMu.RUnlock()
+	if idx < 1 || idx > len(c.peerListCache) {
+		return fmt.Errorf("index out of range: have %d peers, got %d", len(c.peerListCache), idx)
+	}
+	return c.ConnectTo(c.peerListCache[idx-1].ClientID)
+}
+
+func (c *Client) DisconnectPeer(peerID string) {
+	c.disconnectPeer(peerID)
+}
+
+func (c *Client) DisconnectByIndex(idx int) error {
+	c.peerCacheMu.RLock()
+	peers := c.peerListCache
+	c.peerCacheMu.RUnlock()
+
+	if idx < 1 || idx > len(peers) {
+		return fmt.Errorf("index out of range: have %d peers, got %d", len(peers), idx)
+	}
+	c.DisconnectPeer(peers[idx-1].ClientID)
+	return nil
+}
 
 func (c *Client) sendMessage(msg *protocol.Message) error {
 	c.wsMu.Lock()

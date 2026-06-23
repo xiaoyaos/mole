@@ -1,15 +1,17 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
-	"github.com/network-tunnel/net-tunnel/pkg/config"
+	"github.com/chzyer/readline"
+
 	"github.com/network-tunnel/net-tunnel/pkg/client"
+	"github.com/network-tunnel/net-tunnel/pkg/config"
 )
 
 func main() {
@@ -65,14 +67,39 @@ func main() {
 		}
 	}()
 
-	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Println("Commands: list, connect <peer-id>, possess on|off, status, exit")
-	fmt.Print("> ")
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt: "> ",
+		AutoComplete: readline.NewPrefixCompleter(
+			readline.PcItem("list"),
+			readline.PcItem("connect"),
+			readline.PcItem("con"),
+			readline.PcItem("disconnect"),
+			readline.PcItem("disc"),
+			readline.PcItem("possess",
+				readline.PcItem("on"),
+				readline.PcItem("off"),
+			),
+			readline.PcItem("status"),
+			readline.PcItem("exit"),
+			readline.PcItem("quit"),
+		),
+		HistoryFile:            "/tmp/nt-client-history",
+		HistorySearchFold:      true,
+	})
+	if err != nil {
+		log.Fatalf("Readline error: %v", err)
+	}
+	defer rl.Close()
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	fmt.Println("Commands: list, connect|con <peer-id|number>, possess on|off, status, exit")
+
+	for {
+		line, err := rl.Readline()
+		if err != nil {
+			break
+		}
+		line = strings.TrimSpace(line)
 		if line == "" {
-			fmt.Print("> ")
 			continue
 		}
 
@@ -90,13 +117,31 @@ func main() {
 				log.Printf("List error: %v", err)
 			}
 
-		case "connect":
+		case "connect", "con":
 			if len(parts) < 2 {
-				fmt.Println("Usage: connect <peer-id>")
+				fmt.Println("Usage: connect|con <peer-id|number>")
+			} else if n, err := strconv.Atoi(parts[1]); err == nil {
+				if err := c.ConnectByIndex(n); err != nil {
+					log.Printf("Connect error: %v", err)
+				}
 			} else {
 				if err := c.ConnectTo(parts[1]); err != nil {
 					log.Printf("Connect error: %v", err)
 				}
+			}
+
+		case "disconnect", "disc":
+			if len(parts) < 2 {
+				fmt.Println("Usage: disconnect|disc <peer-id|number>")
+			} else if n, err := strconv.Atoi(parts[1]); err == nil {
+				if err := c.DisconnectByIndex(n); err != nil {
+					log.Printf("Disconnect error: %v", err)
+				} else {
+					fmt.Printf("Disconnected peer #%d\n", n)
+				}
+			} else {
+				c.DisconnectPeer(parts[1])
+				fmt.Printf("Disconnected peer %s\n", parts[1])
 			}
 
 		case "possess":
@@ -124,9 +169,7 @@ func main() {
 
 		default:
 			fmt.Printf("Unknown command: %s\n", cmd)
-			fmt.Println("Commands: list, connect <peer-id>, possess on|off, status, exit")
+	fmt.Println("Commands: list, connect|con <peer-id|number>, disconnect|disc <peer-id|number>, possess on|off, status, exit")
 		}
-
-		fmt.Print("> ")
 	}
 }
