@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/network-tunnel/net-tunnel/pkg/config"
-	"github.com/network-tunnel/net-tunnel/pkg/protocol"
-	"github.com/network-tunnel/net-tunnel/pkg/tunnel"
+	"mole/pkg/config"
+	"mole/pkg/protocol"
+	"mole/pkg/tunnel"
 )
 
 func splitSubnets(s string) []string {

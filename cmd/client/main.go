@@ -10,8 +10,8 @@ import (
 
 	"github.com/chzyer/readline"
 
-	"github.com/network-tunnel/net-tunnel/pkg/client"
-	"github.com/network-tunnel/net-tunnel/pkg/config"
+	"mole/pkg/client"
+	"mole/pkg/config"
 )
 
 func main() {

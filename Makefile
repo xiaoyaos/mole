@@ -1,4 +1,4 @@
-REPO := github.com/network-tunnel/net-tunnel
+REPO := mole
 BIN := bin
 GO := go
 

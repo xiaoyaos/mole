@@ -1,4 +1,4 @@
-module github.com/network-tunnel/net-tunnel
+module mole
 
 go 1.25.0
 

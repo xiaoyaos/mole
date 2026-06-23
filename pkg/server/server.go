@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/network-tunnel/net-tunnel/pkg/config"
-	"github.com/network-tunnel/net-tunnel/pkg/protocol"
+	"mole/pkg/config"
+	"mole/pkg/protocol"
 )
 
 type peer struct {

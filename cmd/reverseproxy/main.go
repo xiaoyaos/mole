@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/network-tunnel/net-tunnel/pkg/proxy"
+	"mole/pkg/proxy"
 )
 
 func main() {

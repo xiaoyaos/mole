@@ -1,4 +1,4 @@
-# Net-Tunnel
+# Mole
 
 双向对等内网穿透工具。两端客户端通过中继服务器建立 VPN 隧道，互相访问对方局域网资源，访问者以被访问端的身份出现（SNAT）。
 
@@ -264,8 +264,8 @@ CLI 交互与其他平台一致（↑↓ 历史、Tab 补全、序号选择均�
 ## 开发
 
 ```bash
-git clone <repo> net-tunnel
-cd net-tunnel
+git clone <repo> mole
+cd mole
 
 make deps     # 下载依赖
 make build    # 编译当前平台

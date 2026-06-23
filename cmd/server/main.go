@@ -7,8 +7,8 @@ import (
 	"net"
 	"os"
 
-	"github.com/network-tunnel/net-tunnel/pkg/config"
-	"github.com/network-tunnel/net-tunnel/pkg/server"
+	"mole/pkg/config"
+	"mole/pkg/server"
 )
 
 func main() {
