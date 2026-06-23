@@ -34,11 +34,13 @@
 | 子网共享 | 注册本地子网，对方自动添加路由直达 |
 | SNAT 身份 | 以代理端的身份访问其局域网 |
 | 透明接入 | 虚拟网卡 + 路由，无需应用层代理 |
-| CLI 交互 | `list`、`connect`、`possess`、`status`、`exit` |
+| CLI 交互 | `list`、`connect`/`con`、`disconnect`/`disc`、`possess`、`status`、`exit`（↑↓ 历史、Tab 补全、序号选择） |
 | 跨平台 | macOS / Linux / Windows（CLI 一致） |
 | 自动清理 | 退出时自动删除路由、NAT 规则、关闭虚拟网卡 |
 | 多子网 | 支持逗号分隔多个子网 |
 | 隧道网段可配 | 服务端通过 `-tunnel-net` 指定 |
+| 自动重连 | 连接断开后自动重建隧道（5 秒间隔） |
+| 并发安全 | 所有共享资源互斥锁保护，无竞态 |
 
 ## 快速开始
 
@@ -96,15 +98,21 @@ sudo ./nt-client -server 公网IP:8080 -name client-a
 ### CLI 命令
 
 ```
-> list                    # 查看在线对端
-  client-b (ID) IP=10.0.0.2 [possess=allow], subnet=192.168.2.0/24
+> list                          # 查看在线对端（带序号）
+  1. client-b (abcd1234) IP=10.0.0.2 [possess=allow], subnet=192.168.2.0/24
 
-> connect <peer-id>       # 连接对端（自动添加路由）
+> connect 1                     # 按序号连接（自动添加路由）
+> con abcd1234                  # 按 UUID 连接（con 是 connect 的别名）
 
-> possess off             # 关闭被夺舍（对方自动断开）
-> possess on              # 开启被夺舍
-> status                  # 查看本端状态
-> exit                    # 退出并清理
+> disconnect 1                  # 按序号断开
+> disc abcd1234                 # 按 UUID 断开
+
+> possess off                   # 关闭被夺舍（对方自动断开）
+> possess on                    # 开启被夺舍
+> status                        # 查看本端状态
+> exit                          # 退出并清理
+
+支持 ↑↓ 历史命令导航、Tab 命令补全、左右键编辑。
 ```
 
 ### 访问对方内网
@@ -188,6 +196,7 @@ A 发起对 192.168.2.100 的访问
 | SNAT | `pfctl` | `iptables` | `New-NetNat` |
 | 数据格式 | 原始 IP 包 | 原始 IP 包 | 以太网帧（自动解包） |
 | 子网接口检测 | 遍历网卡 IP | 遍历网卡 IP | 遍历网卡 IP |
+| 额外处理 | TCP 时间戳剥离（SYN） | — | PnP 重置 TAP 驱动状态 |
 
 ## Windows 使用指南
 
@@ -216,12 +225,13 @@ Windows 需要 TAP 虚拟网卡驱动：
 .\nt-client-windows-amd64.exe -server 公网IP:8080 -name client-a
 ```
 
-CLI 交互与其他平台一致：
+CLI 交互与其他平台一致（↑↓ 历史、Tab 补全、序号选择均支持）：
 
 ```
 > list
-> connect <peer-id>
+> connect 1
 > ping 192.168.2.100
+> disc 1
 > possess off
 > exit
 ```
@@ -235,6 +245,21 @@ CLI 交互与其他平台一致：
 | SNAT | 自动调用 PowerShell `New-NetNat` |
 | IP 转发 | 自动设置注册表 `IPEnableRouter=1` |
 | 防火墙 | 首次运行弹窗允许入站即可 |
+| 启动延迟 | 每次启动时自动重置 TAP 驱动状态（PnP 禁用/启用），约 4 秒后才能开始使用 |
+| 第二次运行 | PnP 重置解决了第二次运行转发失效问题，无需重装驱动 |
+
+## 可靠性
+
+| 场景 | 处理方式 |
+|------|---------|
+| WebSocket 断开 | 自动重连，全状态重建（TUN/NAT/路由/对端） |
+| 重连期间用户操作 | 各操作互斥锁保护，不会并发冲突 |
+| 对方主动断连 | 自动清理路由和对端连接 |
+| 夺舍撤销 | 自动断开对方连接 |
+| 并发写入 WebSocket | `wsMu` 互斥锁 + nil 检查 |
+| 中继 TCP 读写死锁 | 双向 `Copy` 退出时关闭对方连接 |
+| 中继阻塞 | `SetWriteDeadline(10s)` 避免永久卡住 |
+| 竞态条件 | 所有共享状态互斥锁保护（`c.mu`、`pc.mu`、`c.wsMu`、`c.peerCacheMu`） |
 
 ## 开发
 
@@ -251,16 +276,19 @@ make release  # 交叉编译全部 6 个平台
 
 ### 编译产物
 
-`make release` 生成：
+`make release` 生成到 `bin/` 目录：
 
 | 文件 | 平台 | 架构 |
 |------|------|------|
-| `nt-{server,client}-darwin-amd64` | macOS | Intel |
-| `nt-{server,client}-darwin-arm64` | macOS | Apple Silicon |
-| `nt-{server,client}-linux-amd64` | Linux | x86_64 |
-| `nt-{server,client}-linux-arm64` | Linux | ARM64 |
-| `nt-{server,client}-windows-amd64.exe` | Windows | x86_64 |
-| `nt-{server,client}-windows-arm64.exe` | Windows | ARM64 |
+| `bin/client/nt-client-darwin-amd64` | macOS | Intel |
+| `bin/client/nt-client-darwin-arm64` | macOS | Apple Silicon |
+| `bin/client/nt-client-linux-amd64` | Linux | x86_64 |
+| `bin/client/nt-client-linux-arm64` | Linux | ARM64 |
+| `bin/client/nt-client-windows-amd64.exe` | Windows | x86_64 |
+| `bin/client/nt-client-windows-arm64.exe` | Windows | ARM64 |
+| `bin/server/nt-server-darwin-amd64` / `arm64` | macOS | Intel / ARM |
+| `bin/server/nt-server-linux-amd64` / `arm64` | Linux | x86_64 / ARM64 |
+| `bin/server/nt-server-windows-amd64.exe` / `arm64.exe` | Windows | x86_64 / ARM64 |
 
 ## 协议
 
