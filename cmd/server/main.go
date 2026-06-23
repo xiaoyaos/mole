@@ -11,10 +11,18 @@ import (
 	"mole/pkg/server"
 )
 
+var Version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "show version")
 	addr := flag.String("listen", ":8080", "server listen address")
 	auth := flag.String("auth", "", "authentication token")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("mole-server %s\n", Version)
+		os.Exit(0)
+	}
 
 	cfg := config.DefaultServerConfig()
 	cfg.Listen = *addr
@@ -32,7 +40,7 @@ func main() {
 		log.Fatalf("Failed to create server: %v", err)
 	}
 
-	fmt.Printf("=== Net-Tunnel Relay Server ===\n")
+	fmt.Printf("=== Mole Relay Server ===\n")
 	fmt.Printf("Listen: %s\n", cfg.Listen)
 	fmt.Printf("Relay:  %s:8081\n", extractHost(cfg.Listen))
 	if cfg.AuthToken != "" {

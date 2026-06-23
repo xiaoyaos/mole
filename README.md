@@ -48,24 +48,24 @@
 
 ```bash
 # 前台运行
-sudo ./nt-server -listen :8080
+sudo ./mole-server -listen :8080
 
 # 后台运行
-sudo ./nt-server -listen :8080 &
-sudo nohup ./nt-server -listen :8080 > /tmp/nt-server.log 2>&1 &
+sudo ./mole-server -listen :8080 &
+sudo nohup ./mole-server -listen :8080 > /tmp/mole-server.log 2>&1 &
 
 # 启用认证
-sudo ./nt-server -listen :8080 -auth mytoken
+sudo ./mole-server -listen :8080 -auth mytoken
 ```
 
 Windows 后台运行：
 
 ```powershell
 # 隐藏窗口后台运行
-Start-Process -NoNewWindow -FilePath ".\nt-server-windows-amd64.exe" -ArgumentList "-listen :8080"
+Start-Process -NoNewWindow -FilePath ".\mole-server-windows-amd64.exe" -ArgumentList "-listen :8080"
 
 # 或作为后台作业
-Start-Job -ScriptBlock { .\nt-server-windows-amd64.exe -listen :8080 }
+Start-Job -ScriptBlock { .\mole-server-windows-amd64.exe -listen :8080 }
 ```
 
 服务端启动后会监听两个端口：
@@ -78,21 +78,21 @@ Start-Job -ScriptBlock { .\nt-server-windows-amd64.exe -listen :8080 }
 
 ```bash
 # 自动检测本地子网
-sudo ./nt-client -server 公网IP:8080 -name client-b -allow-possess
+sudo ./mole-client -server 公网IP:8080 -name client-b -allow-possess
 
 # 手动指定子网
-sudo ./nt-client -server 公网IP:8080 -name client-b \
+sudo ./mole-client -server 公网IP:8080 -name client-b \
   -local-subnet 192.168.2.0/24 -allow-possess
 
 # 多子网
-sudo ./nt-client -server 公网IP:8080 -name client-b \
+sudo ./mole-client -server 公网IP:8080 -name client-b \
   -local-subnet "192.168.2.0/24,10.0.1.0/24" -allow-possess
 ```
 
 **A 端（不共享，主动连接）**：
 
 ```bash
-sudo ./nt-client -server 公网IP:8080 -name client-a
+sudo ./mole-client -server 公网IP:8080 -name client-a
 ```
 
 ### CLI 命令
@@ -126,15 +126,16 @@ curl http://192.168.2.100:8080        # 访问 B 内网服务
 
 ## 命令行选项
 
-### nt-server
+### mole-server
 
 | 选项 | 默认 | 环境变量 | 说明 |
 |------|------|---------|------|
 | `-listen` | `:8080` | `NT_LISTEN` | WebSocket 信令监听地址（数据中继为同主机 :8081） |
 | `-auth` | `""` | `NT_AUTH_TOKEN` | 客户端注册认证令牌 |
 | `-tunnel-net` | `10.0.0.0/24` | — | 隧道虚拟网段 |
+| `-version` | — | — | 显示版本号并退出 |
 
-### nt-client
+### mole-client
 
 | 选项 | 默认 | 环境变量 | 说明 |
 |------|------|---------|------|
@@ -143,6 +144,7 @@ curl http://192.168.2.100:8080        # 访问 B 内网服务
 | `-auth` | `""` | `NT_AUTH_TOKEN` | 认证令牌 |
 | `-allow-possess` | `false` | `NT_ALLOW_POSSESS` | 允许被对方主动连接 |
 | `-local-subnet` | `""` | `NT_LOCAL_SUBNET` | 共享的本地子网，多个用逗号分隔（留空自动检测） |
+| `-version` | — | — | 显示版本号并退出 |
 
 ## 工作原理
 
@@ -215,14 +217,14 @@ Windows 需要 TAP 虚拟网卡驱动：
 
 ```powershell
 # 目标端（共享子网，允许被访问）
-.\nt-client-windows-amd64.exe -server 公网IP:8080 -name client-b -allow-possess
+.\mole-client-windows-amd64.exe -server 公网IP:8080 -name client-b -allow-possess
 
 # 多网卡环境手动指定子网
-.\nt-client-windows-amd64.exe -server 公网IP:8080 -name client-b `
+.\mole-client-windows-amd64.exe -server 公网IP:8080 -name client-b `
   -local-subnet 192.168.2.0/24 -allow-possess
 
 # 发起端
-.\nt-client-windows-amd64.exe -server 公网IP:8080 -name client-a
+.\mole-client-windows-amd64.exe -server 公网IP:8080 -name client-a
 ```
 
 CLI 交互与其他平台一致（↑↓ 历史、Tab 补全、序号选择均支持）：
@@ -280,15 +282,15 @@ make release  # 交叉编译全部 6 个平台
 
 | 文件 | 平台 | 架构 |
 |------|------|------|
-| `bin/client/nt-client-darwin-amd64` | macOS | Intel |
-| `bin/client/nt-client-darwin-arm64` | macOS | Apple Silicon |
-| `bin/client/nt-client-linux-amd64` | Linux | x86_64 |
-| `bin/client/nt-client-linux-arm64` | Linux | ARM64 |
-| `bin/client/nt-client-windows-amd64.exe` | Windows | x86_64 |
-| `bin/client/nt-client-windows-arm64.exe` | Windows | ARM64 |
-| `bin/server/nt-server-darwin-amd64` / `arm64` | macOS | Intel / ARM |
-| `bin/server/nt-server-linux-amd64` / `arm64` | Linux | x86_64 / ARM64 |
-| `bin/server/nt-server-windows-amd64.exe` / `arm64.exe` | Windows | x86_64 / ARM64 |
+| `bin/client/mole-client-darwin-amd64` | macOS | Intel |
+| `bin/client/mole-client-darwin-arm64` | macOS | Apple Silicon |
+| `bin/client/mole-client-linux-amd64` | Linux | x86_64 |
+| `bin/client/mole-client-linux-arm64` | Linux | ARM64 |
+| `bin/client/mole-client-windows-amd64.exe` | Windows | x86_64 |
+| `bin/client/mole-client-windows-arm64.exe` | Windows | ARM64 |
+| `bin/server/mole-server-darwin-amd64` / `arm64` | macOS | Intel / ARM |
+| `bin/server/mole-server-linux-amd64` / `arm64` | Linux | x86_64 / ARM64 |
+| `bin/server/mole-server-windows-amd64.exe` / `arm64.exe` | Windows | x86_64 / ARM64 |
 
 ## 协议
 

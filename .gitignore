@@ -3,3 +3,6 @@ bin/
 *.test
 *.out
 .DS_Store
+nt-*
+mole-server
+mole-client

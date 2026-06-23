@@ -14,13 +14,21 @@ import (
 	"mole/pkg/config"
 )
 
+var Version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "show version")
 	serverAddr := flag.String("server", "127.0.0.1:8080", "relay server address")
 	clientName := flag.String("name", "", "client name")
 	auth := flag.String("auth", "", "auth token")
 	allowPossess := flag.Bool("allow-possess", false, "allow other peers to connect")
 	localSubnet := flag.String("local-subnet", "", "local subnet to share (auto-detect if empty)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("mole-client %s\n", Version)
+		os.Exit(0)
+	}
 
 	cfg := config.DefaultClientConfig()
 	cfg.ServerAddr = *serverAddr
@@ -50,7 +58,7 @@ func main() {
 		cfg.ClientName = hostname
 	}
 
-	fmt.Printf("=== Net-Tunnel Client ===\n")
+	fmt.Printf("=== Mole Client ===\n")
 	fmt.Printf("Server:  %s\n", cfg.ServerAddr)
 	fmt.Printf("Name:    %s\n", cfg.ClientName)
 	fmt.Printf("Possess: %v\n", cfg.AllowPossess)
