@@ -15,8 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -36,9 +34,6 @@ jobs:
         env:
           CGO_ENABLED: "0"
 
-      - name: List artifacts
-        run: find bin/ -type f
-
       - name: Upload artifacts (commit)
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
@@ -48,24 +43,10 @@ jobs:
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          set -e
-          rm -f bin/**/*.txt 2>/dev/null || true
-
-          # Generate release notes
-          echo "## 安装" > release-notes.md
-          echo "" >> release-notes.md
-          echo '从下方下载对应平台的二进制文件。`nt-server` 是服务端，`nt-client` 是客户端。' >> release-notes.md
-          echo "" >> release-notes.md
-
-          gh release create "${{ github.ref_name }}" \
-            --title "${{ github.ref_name }}" \
-            --notes-file release-notes.md \
-            --verify-tag
-
-          for f in $(find bin/ -type f); do
-            echo "Uploading $f..."
-            gh release upload "${{ github.ref_name }}" "$f" --clobber
-          done
-        env:
-          GH_TOKEN: ${{ github.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bin/server/*
+            bin/client/*
+          generate_release_notes: true
+          make_latest: true
