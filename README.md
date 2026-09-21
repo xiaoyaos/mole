@@ -44,6 +44,27 @@
 
 ## 快速开始
 
+### 下载客户端
+
+GitHub Releases 是客户端的唯一分发入口：
+
+| 平台 | 发布文件 | 使用方式 |
+|------|----------|----------|
+| Linux x86_64 | `mole-client-linux-amd64.tar.gz` | 解压后运行 `install.sh`，或使用下方一键安装命令 |
+| Linux ARM64 | `mole-client-linux-arm64.tar.gz` | 解压后运行 `install.sh`，或使用下方一键安装命令 |
+| macOS Apple Silicon | `mole-client-macos-arm64.dmg` | 打开 DMG，把 Mole 放入“应用程序”，通过最小启动器运行 |
+| Windows x64 | `mole-client-windows-amd64-setup.exe` | 运行一个安装程序；其中已包含 Mole 客户端和 TAP 驱动 |
+
+Linux 一键安装（自动识别 x86_64/ARM64，并校验 SHA256）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xiaoyaos/mole/main/packaging/linux/install-latest.sh | sh
+```
+
+macOS 与 Windows 启动器只需要服务器 IP/域名和连接端口。共享开关直接显示；数据转发端口（默认 `18081`）、认证令牌和共享网段位于高级选项。客户端名默认使用主机名。启动后继续在终端中使用 `list`、`connect`、`disconnect` 和 `exit`；启动器的“安全停止”会执行与 `exit` 相同的清理流程。
+
+首版安装包使用临时签名或未签名方式发布。macOS 首次打开时可在 Finder 中按住 Control 点击应用并选择“打开”；Windows 可能显示 SmartScreen 提示。可使用 Release 中的 `SHA256SUMS` 核对下载文件。
+
 ### 启动中继服务器（公网机器）
 
 ```bash
@@ -71,6 +92,16 @@ Start-Job -ScriptBlock { .\mole-server-windows-amd64.exe -listen :8080 }
 服务端启动后会监听两个端口：
 - `:8080` — WebSocket 信令
 - `:8081` — TCP 数据中继（与 `-listen` 同主机）
+
+如果 8081 已被 Docker、EMQX 等服务占用，可以更换数据中继端口。服务端和两个客户端使用相同的 `-relay-port`：
+
+```bash
+./mole-server -listen :8080 -relay-port 18081
+sudo ./mole-client -server 公网IP:8080 -relay-port 18081 -name client-b -allow-possess
+sudo ./mole-client -server 公网IP:8080 -relay-port 18081 -name client-a
+```
+
+信令和数据端口必须不同，且两者均需可达。任一端口无法监听时，服务端会退出并释放已经打开的监听端口。ToolHub 的参数表单默认使用 18081，以避开本机 EMQX 的 8081；已有命名预设继续保留旧端口。
 
 ### 启动客户端
 
@@ -130,7 +161,8 @@ curl http://192.168.2.100:8080        # 访问 B 内网服务
 
 | 选项 | 默认 | 环境变量 | 说明 |
 |------|------|---------|------|
-| `-listen` | `:8080` | `NT_LISTEN` | WebSocket 信令监听地址（数据中继为同主机 :8081） |
+| `-listen` | `:8080` | `NT_LISTEN` | WebSocket 信令监听地址 |
+| `-relay-port` | `8081` | `NT_RELAY_PORT` | 同主机的 TCP 数据中继端口，须与客户端一致 |
 | `-auth` | `""` | `NT_AUTH_TOKEN` | 客户端注册认证令牌 |
 | `-tunnel-net` | `10.0.0.0/24` | — | 隧道虚拟网段 |
 | `-version` | — | — | 显示版本号并退出 |
@@ -140,6 +172,7 @@ curl http://192.168.2.100:8080        # 访问 B 内网服务
 | 选项 | 默认 | 环境变量 | 说明 |
 |------|------|---------|------|
 | `-server` | `127.0.0.1:8080` | `NT_SERVER` | 中继服务器地址 |
+| `-relay-port` | `8081` | `NT_RELAY_PORT` | TCP 数据中继端口，须与服务端一致 |
 | `-name` | 本机主机名 | `NT_NAME` | 客户端标识名称 |
 | `-auth` | `""` | `NT_AUTH_TOKEN` | 认证令牌 |
 | `-allow-possess` | `false` | `NT_ALLOW_POSSESS` | 允许被对方主动连接 |

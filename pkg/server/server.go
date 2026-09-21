@@ -119,31 +119,39 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 }
 
 func (s *Server) Start() error {
-	http.HandleFunc("/ws", s.handleWebSocket)
-	http.HandleFunc("/health", s.handleHealth)
-
-	go s.startTCPRelay()
-
-	addr := s.cfg.Listen
-	log.Printf("Relay server starting on %s", addr)
-	return http.ListenAndServe(addr, nil)
+	signaling, relay, err := s.listen()
+	if err != nil {
+		return err
+	}
+	defer signaling.Close()
+	defer relay.Close()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/health", s.handleHealth)
+	go s.serveTCPRelay(relay)
+	log.Printf("Relay server starting on %s", signaling.Addr())
+	return http.Serve(signaling, mux)
 }
 
-func (s *Server) startTCPRelay() {
-	host, _, err := net.SplitHostPort(s.cfg.Listen)
+func (s *Server) listen() (net.Listener, net.Listener, error) {
+	relayAddr, err := config.RelayAddress(s.cfg.Listen, s.cfg.RelayPort)
 	if err != nil {
-		host = "0.0.0.0"
+		return nil, nil, err
 	}
-	relayAddr := fmt.Sprintf("%s:8081", host)
-
-	listener, err := net.Listen("tcp", relayAddr)
+	signaling, err := net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
-		log.Printf("TCP relay listen error: %v", err)
-		return
+		return nil, nil, fmt.Errorf("signaling listen on %s: %w", s.cfg.Listen, err)
 	}
-	defer listener.Close()
+	relay, err := net.Listen("tcp", relayAddr)
+	if err != nil {
+		signaling.Close()
+		return nil, nil, fmt.Errorf("TCP relay listen on %s failed; change -relay-port on both server and clients: %w", relayAddr, err)
+	}
+	return signaling, relay, nil
+}
 
-	log.Printf("TCP relay listening on %s", relayAddr)
+func (s *Server) serveTCPRelay(listener net.Listener) {
+	log.Printf("TCP relay listening on %s", listener.Addr())
 
 	pending := make(map[string]chan net.Conn)
 	var mu sync.Mutex
@@ -151,8 +159,7 @@ func (s *Server) startTCPRelay() {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("TCP relay accept error: %v", err)
-			continue
+			return
 		}
 
 		go func(conn net.Conn) {

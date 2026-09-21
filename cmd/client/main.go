@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/chzyer/readline"
 
@@ -19,6 +20,7 @@ var Version = "dev"
 func main() {
 	showVersion := flag.Bool("version", false, "show version")
 	serverAddr := flag.String("server", "127.0.0.1:8080", "relay server address")
+	relayPort := flag.Int("relay-port", config.DefaultRelayPort, "TCP data relay port (must match server)")
 	clientName := flag.String("name", "", "client name")
 	auth := flag.String("auth", "", "auth token")
 	allowPossess := flag.Bool("allow-possess", false, "allow other peers to connect")
@@ -32,6 +34,7 @@ func main() {
 
 	cfg := config.DefaultClientConfig()
 	cfg.ServerAddr = *serverAddr
+	cfg.RelayPort = *relayPort
 	cfg.ClientName = *clientName
 	cfg.AuthToken = *auth
 	cfg.AllowPossess = *allowPossess
@@ -52,6 +55,20 @@ func main() {
 	if envSubnet := os.Getenv("NT_LOCAL_SUBNET"); envSubnet != "" {
 		cfg.LocalSubnet = envSubnet
 	}
+	if value := os.Getenv("NT_RELAY_PORT"); value != "" {
+		port, err := strconv.Atoi(value)
+		if err != nil {
+			log.Fatalf("Invalid NT_RELAY_PORT: %v", err)
+		}
+		cfg.RelayPort = port
+	}
+	if cfg.RelayPort < 1 || cfg.RelayPort > 65535 {
+		log.Fatal("-relay-port must be between 1 and 65535")
+	}
+	relayAddress, err := config.RelayAddress(cfg.ServerAddr, cfg.RelayPort)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	if cfg.ClientName == "" {
 		hostname, _ := os.Hostname()
@@ -60,6 +77,7 @@ func main() {
 
 	fmt.Printf("=== Mole Client ===\n")
 	fmt.Printf("Server:  %s\n", cfg.ServerAddr)
+	fmt.Printf("Relay:   %s\n", relayAddress)
 	fmt.Printf("Name:    %s\n", cfg.ClientName)
 	fmt.Printf("Possess: %v\n", cfg.AllowPossess)
 	if cfg.LocalSubnet != "" {
@@ -68,6 +86,7 @@ func main() {
 	fmt.Println()
 
 	c := client.NewClient(cfg)
+	defer c.Stop()
 
 	go func() {
 		if err := c.Start(); err != nil {
@@ -91,13 +110,38 @@ func main() {
 			readline.PcItem("exit"),
 			readline.PcItem("quit"),
 		),
-		HistoryFile:            "/tmp/nt-client-history",
-		HistorySearchFold:      true,
+		HistoryFile:       "/tmp/nt-client-history",
+		HistorySearchFold: true,
 	})
 	if err != nil {
 		log.Fatalf("Readline error: %v", err)
 	}
 	defer rl.Close()
+
+	// Launchers set this environment variable so their Stop button can request
+	// the same graceful cleanup as the interactive "exit" command.
+	stopMonitorDone := make(chan struct{})
+	defer close(stopMonitorDone)
+	if stopFile := os.Getenv("MOLE_STOP_FILE"); stopFile != "" {
+		_ = os.Remove(stopFile)
+		go func() {
+			ticker := time.NewTicker(300 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stopMonitorDone:
+					return
+				case <-ticker.C:
+					if _, err := os.Stat(stopFile); err == nil {
+						_ = os.Remove(stopFile)
+						fmt.Println("\nLauncher requested a safe shutdown...")
+						_ = rl.Close()
+						return
+					}
+				}
+			}
+		}()
+	}
 
 	fmt.Println("Commands: list, connect|con <peer-id|number>, possess on|off, status, exit")
 
@@ -117,7 +161,6 @@ func main() {
 		switch cmd {
 		case "exit", "quit":
 			fmt.Println("Shutting down...")
-			c.Stop()
 			return
 
 		case "list":
@@ -177,7 +220,7 @@ func main() {
 
 		default:
 			fmt.Printf("Unknown command: %s\n", cmd)
-	fmt.Println("Commands: list, connect|con <peer-id|number>, disconnect|disc <peer-id|number>, possess on|off, status, exit")
+			fmt.Println("Commands: list, connect|con <peer-id|number>, disconnect|disc <peer-id|number>, possess on|off, status, exit")
 		}
 	}
 }

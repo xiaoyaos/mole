@@ -424,14 +424,13 @@ func (c *Client) establishDataConnection(peerID, peerIP, peerName, localSubnet s
 }
 
 func (c *Client) connectToPeer(pc *peerConnection) {
-	relayHost, _, err := net.SplitHostPort(c.relayAddr)
+	relayAddr, err := config.RelayAddress(c.relayAddr, c.cfg.RelayPort)
 	if err != nil {
 		log.Printf("Invalid relay addr: %v", err)
 		c.removePeer(pc.peerID)
 		return
 	}
 
-	relayAddr := fmt.Sprintf("%s:8081", relayHost)
 	a, b := c.clientID, pc.peerID
 	if a > b {
 		a, b = b, a
@@ -772,10 +771,10 @@ func (c *Client) Peers() map[string]*peerConnection {
 	return peers
 }
 
-func (p *peerConnection) PeerID() string   { return p.peerID }
-func (p *peerConnection) PeerName() string { return p.peerName }
-func (p *peerConnection) PeerIP() string   { return p.peerIP }
-func (p *peerConnection) AllowPossess() bool { return p.allowPossess }
+func (p *peerConnection) PeerID() string      { return p.peerID }
+func (p *peerConnection) PeerName() string    { return p.peerName }
+func (p *peerConnection) PeerIP() string      { return p.peerIP }
+func (p *peerConnection) AllowPossess() bool  { return p.allowPossess }
 func (p *peerConnection) LocalSubnet() string { return p.localSubnet }
 
 func shortID(id string) string {
@@ -841,7 +840,7 @@ func stripTCPTimestamp(packet []byte) []byte {
 		return packet
 	}
 	tcpOff := ipHdrLen
-	dataOff := int(packet[tcpOff+12] >> 4) * 4
+	dataOff := int(packet[tcpOff+12]>>4) * 4
 	if dataOff <= 20 {
 		return packet
 	}

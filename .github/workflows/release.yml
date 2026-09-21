@@ -8,45 +8,98 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('dev-{0}', github.sha) }}
 
 jobs:
-  build:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-
-      - name: Get version
-        id: version
-        run: |
-          if [[ "${{ github.ref }}" =~ ^refs/tags/v ]]; then
-            echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
-          else
-            echo "VERSION=dev-${GITHUB_SHA::7}" >> $GITHUB_ENV
-          fi
-
-      - name: Build all platforms
-        run: make release VERSION=${{ env.VERSION }}
+      - run: go test ./...
+      - name: Build Linux clients
         env:
           CGO_ENABLED: "0"
-
-      - name: Upload artifacts (commit)
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        run: |
+          mkdir -p bin/client
+          GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o bin/client/mole-client-linux-amd64 ./cmd/client
+          GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=${VERSION}" -o bin/client/mole-client-linux-arm64 ./cmd/client
+          bash scripts/package-linux.sh amd64 "${VERSION}"
+          bash scripts/package-linux.sh arm64 "${VERSION}"
+      - uses: actions/upload-artifact@v4
         with:
-          name: mole-binaries
-          path: bin/
+          name: mole-linux
+          path: dist/*.tar.gz
+          if-no-files-found: error
 
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build Apple Silicon client and DMG
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p bin/client
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=${VERSION}" -o bin/client/mole-client-darwin-arm64 ./cmd/client
+          bash scripts/package-macos.sh "${VERSION}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mole-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build Windows x64 client
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path bin/client -Force | Out-Null
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -ldflags "-X main.Version=$env:VERSION" -o bin/client/mole-client-windows-amd64.exe ./cmd/client
+          ./scripts/package-windows.ps1 -Version $env:VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mole-windows
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum mole-client-* > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
         with:
           files: |
-            bin/server/*
-            bin/client/*
+            dist/mole-client-linux-amd64.tar.gz
+            dist/mole-client-linux-arm64.tar.gz
+            dist/mole-client-macos-arm64.dmg
+            dist/mole-client-windows-amd64-setup.exe
+            dist/SHA256SUMS
           generate_release_notes: true
           make_latest: true
